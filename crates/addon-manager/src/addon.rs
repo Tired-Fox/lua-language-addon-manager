@@ -6,7 +6,7 @@ use url::Url;
 use crate::Error;
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "kebab-case")]
 pub enum Target {
     #[default]
     LuaCats,

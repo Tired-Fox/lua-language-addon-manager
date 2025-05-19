@@ -3,31 +3,23 @@
 //! Check the official documentation for possible settings and values.
 //! - https://luals.github.io/wiki/settings/#settings
 //!
-//! This library will add custom fields to different settings/configurations. This allows
-//! it to use the `.luarc.json` file alongside luals.
-//!
-//! # Added Fields:
-//! - `workspace.addons`: An object of where the key is the addon name and the value is a json
-//!   representation of [`Addon`][crate::Addon]. This information is used to know what addons are
-//!   currently installed. Similar to the `"dependencies"` entry in a `npm` project's `package.json`
+//! This library handles parsing the defined fields in the configuration
+//! file along with making adding your own fields a breeze.
 
 use std::{
-    borrow::Cow, collections::{BTreeMap, HashSet}, path::Path, str::FromStr
+    borrow::Cow, collections::{BTreeMap, HashSet}, marker::PhantomData, ops::{Deref, DerefMut}, path::Path, str::FromStr
 };
 
-use serde::{de::{DeserializeOwned, Visitor}, Deserialize, Serialize};
-use serde_json::Value;
-
-mod addon;
-pub use addon::{Target, Addon};
+use serde::{
+    Deserialize, Serialize,
+    de::{DeserializeOwned, Visitor},
+};
 
 mod error;
 pub use error::Error;
 
 pub mod diagnostics;
 use diagnostics::{Diagnostic, DiagnosticGroup};
-
-pub static LUARC: &str = ".luarc.json";
 
 #[inline(always)]
 const fn enabled(ctx: &bool) -> bool { *ctx }
@@ -38,21 +30,34 @@ const fn zero(ctx: &usize) -> bool { *ctx == 0 }
 #[inline(always)]
 const fn default_true() -> bool { true }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct AddonManager {
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
+pub struct AddonManager<O = ()> {
     #[serde(default = "default_true", skip_serializing_if = "enabled")]
     pub enable: bool,
 
-    #[serde(flatten, skip_serializing_if = "Option::is_none")]
-    pub other: Option<BTreeMap<String, Value>>,
+    #[serde(flatten)]
+    pub custom: O,
 }
 
-impl Default for AddonManager {
+impl<O: Default> Default for AddonManager<O> {
     fn default() -> Self {
         Self {
             enable: true,
-            other: None,
+            custom: Default::default(),
         }
+    }
+}
+
+impl<O> Deref for AddonManager<O> {
+    type Target = O;
+    fn deref(&self) -> &Self::Target {
+        &self.custom
+    }
+}
+
+impl<O> DerefMut for AddonManager<O> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.custom
     }
 }
 
@@ -72,9 +77,9 @@ pub enum Show {
     Fallback,
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct Completion {
+pub struct Completion<O = ()> {
     #[serde(default = "default_true", skip_serializing_if = "enabled")]
     pub enable: bool,
     #[serde(default = "default_true", skip_serializing_if = "enabled")]
@@ -96,11 +101,11 @@ pub struct Completion {
     #[serde(default = "default_true", skip_serializing_if = "enabled")]
     pub workspace_word: bool,
 
-    #[serde(flatten, skip_serializing_if = "Option::is_none")]
-    pub other: Option<BTreeMap<String, Value>>,
+    #[serde(flatten)]
+    pub custom: O,
 }
 
-impl Default for Completion {
+impl<O: Default> Default for Completion<O> {
     fn default() -> Self {
         Self {
             enable: true,
@@ -114,8 +119,21 @@ impl Default for Completion {
             show_word: None,
             workspace_word: true,
 
-            other: None,
+            custom: Default::default(),
         }
+    }
+}
+
+impl<O> Deref for Completion<O> {
+    type Target = O;
+    fn deref(&self) -> &Self::Target {
+        &self.custom
+    }
+}
+
+impl<O> DerefMut for Completion<O> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.custom
     }
 }
 
@@ -200,9 +218,9 @@ pub enum Event {
     None,
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct Diagnostics {
+pub struct Diagnostics<O = ()> {
     #[serde(default = "default_true", skip_serializing_if = "enabled")]
     pub enable: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -227,43 +245,32 @@ pub struct Diagnostics {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unused_local_exclude: Vec<String>,
     #[serde(
-        default = "Diagnostics::workspace_delay",
-        skip_serializing_if = "Self::three_minute_validate"
+        default = "diagnostic_serde::workspace_delay",
+        skip_serializing_if = "diagnostic_serde::three_minute_validate"
     )]
     pub workspace_delay: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_event: Option<Event>,
     #[serde(
-        default = "Diagnostics::workspace_rate",
-        skip_serializing_if = "Self::full_percent_validate"
+        default = "diagnostic_serde::workspace_rate",
+        skip_serializing_if = "diagnostic_serde::full_percent_validate"
     )]
     pub workspace_rate: usize,
 
-    #[serde(flatten, skip_serializing_if = "Option::is_none")]
-    pub other: Option<BTreeMap<String, Value>>,
+    #[serde(flatten)]
+    pub custom: O,
 }
 
-impl Diagnostics {
+mod diagnostic_serde {
     #[inline]
-    fn workspace_delay() -> usize {
-        3000
-    }
-
+    pub fn workspace_delay() -> usize { 3000 }
     #[inline]
-    fn workspace_rate() -> usize {
-        100
-    }
-
-    const fn three_minute_validate(ctx: &usize) -> bool {
-        *ctx == 3000
-    }
-
-    const fn full_percent_validate(ctx: &usize) -> bool {
-        *ctx == 100
-    }
+    pub fn workspace_rate() -> usize { 100 }
+    pub const fn three_minute_validate(ctx: &usize) -> bool { *ctx == 3000 }
+    pub const fn full_percent_validate(ctx: &usize) -> bool { *ctx == 100 }
 }
 
-impl Default for Diagnostics {
+impl<O: Default> Default for Diagnostics<O> {
     fn default() -> Self {
         Self {
             enable: true,
@@ -281,14 +288,27 @@ impl Default for Diagnostics {
             needed_file_status: BTreeMap::default(),
             severity: BTreeMap::default(),
 
-            other: None,
+            custom: Default::default(),
         }
     }
 }
 
-#[derive(Default, Debug, Deserialize, Serialize, PartialEq, Eq)]
+impl<O> Deref for Diagnostics<O> {
+    type Target = O;
+    fn deref(&self) -> &Self::Target {
+        &self.custom
+    }
+}
+
+impl<O> DerefMut for Diagnostics<O> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.custom
+    }
+}
+
+#[derive(Default, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct Doc {
+pub struct Doc<O = ()> {
     #[serde(default, skip_serializing_if = "HashSet::is_empty")]
     pub package_name: HashSet<String>,
 
@@ -298,31 +318,55 @@ pub struct Doc {
     #[serde(default, skip_serializing_if = "HashSet::is_empty")]
     pub protected_name: HashSet<String>,
 
-    #[serde(flatten, skip_serializing_if = "Option::is_none")]
-    pub other: Option<BTreeMap<String, Value>>,
+    #[serde(flatten)]
+    pub custom: O,
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+impl<O> Deref for Doc<O> {
+    type Target = O;
+    fn deref(&self) -> &Self::Target {
+        &self.custom
+    }
+}
+impl<O> DerefMut for Doc<O> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.custom
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct Format {
+pub struct Format<O = ()> {
     #[serde(default = "default_true", skip_serializing_if = "enabled")]
     pub enable: bool,
 
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub default_config: BTreeMap<Cow<'static, str>, Cow<'static, str>>,
 
-    #[serde(flatten, skip_serializing_if = "Option::is_none")]
-    pub other: Option<BTreeMap<String, Value>>,
+    #[serde(flatten)]
+    pub custom: O,
 }
 
-impl Default for Format {
+impl<O: Default> Default for Format<O> {
     fn default() -> Self {
         Self {
             enable: true,
             default_config: BTreeMap::default(),
 
-            other: None,
+            custom: Default::default(),
         }
+    }
+}
+
+impl<O> Deref for Format<O> {
+    type Target = O;
+    fn deref(&self) -> &Self::Target {
+        &self.custom
+    }
+}
+impl<O> DerefMut for Format<O> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.custom
     }
 }
 
@@ -347,9 +391,9 @@ pub enum SemiColon {
     Disable,
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct Hint {
+pub struct Hint<O = ()> {
     #[serde(default = "default_true", skip_serializing_if = "enabled")]
     pub enable: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -365,11 +409,11 @@ pub struct Hint {
     #[serde(default, skip_serializing_if = "disabled")]
     pub set_type: bool,
 
-    #[serde(flatten, skip_serializing_if = "Option::is_none")]
-    pub other: Option<BTreeMap<String, Value>>,
+    #[serde(flatten)]
+    pub custom: O,
 }
 
-impl Default for Hint {
+impl<O: Default> Default for Hint<O> {
     fn default() -> Self {
         Self {
             enable: true,
@@ -380,34 +424,58 @@ impl Default for Hint {
             semicolon: None,
             set_type: false,
 
-            other: None,
+            custom: Default::default(),
         }
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+impl<O> Deref for Hint<O> {
+    type Target = O;
+    fn deref(&self) -> &Self::Target {
+        &self.custom
+    }
+}
+impl<O> DerefMut for Hint<O> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.custom
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct Hover {
+pub struct Hover<O = ()> {
     #[serde(default = "default_true", skip_serializing_if = "enabled")]
     pub enable: bool,
-    #[serde(default, skip_serializing_if = "Self::enum_limit_validate")]
+    #[serde(default, skip_serializing_if = "hover_serde::enum_limit_validate")]
     pub enums_limit: usize,
     #[serde(default = "default_true", skip_serializing_if = "enabled")]
     pub expand_alias: bool,
-    #[serde(default, skip_serializing_if = "Self::preview_fields_validate")]
+    #[serde(default, skip_serializing_if = "hover_serde::preview_fields_validate")]
     pub preview_fields: usize,
     #[serde(default = "default_true", skip_serializing_if = "enabled")]
     pub view_number: bool,
     #[serde(default = "default_true", skip_serializing_if = "enabled")]
     pub view_string: bool,
-    #[serde(default, skip_serializing_if = "Self::view_string_max_validate")]
+    #[serde(default, skip_serializing_if = "hover_serde::view_string_max_validate")]
     pub view_string_max: usize,
 
-    #[serde(flatten, skip_serializing_if = "Option::is_none")]
-    pub other: Option<BTreeMap<String, Value>>,
+    #[serde(flatten)]
+    pub custom: O,
 }
 
-impl Default for Hover {
+impl<O> Deref for Hover<O> {
+    type Target = O;
+    fn deref(&self) -> &Self::Target {
+        &self.custom
+    }
+}
+impl<O> DerefMut for Hover<O> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.custom
+    }
+}
+
+impl<O: Default> Default for Hover<O> {
     fn default() -> Self {
         Self {
             enable: true,
@@ -418,35 +486,39 @@ impl Default for Hover {
             view_string: true,
             view_string_max: 1000,
 
-            other: None,
+            custom: Default::default(),
         }
     }
 }
 
-impl Hover {
-    const fn enum_limit_validate(ctx: &usize) -> bool {
-        *ctx == 5
-    }
-
-    const fn preview_fields_validate(ctx: &usize) -> bool {
-        *ctx == 50
-    }
-
-    const fn view_string_max_validate(ctx: &usize) -> bool {
-        *ctx == 1000
-    }
+mod hover_serde {
+    pub const fn enum_limit_validate(ctx: &usize) -> bool { *ctx == 5 }
+    pub const fn preview_fields_validate(ctx: &usize) -> bool { *ctx == 50 }
+    pub const fn view_string_max_validate(ctx: &usize) -> bool { *ctx == 1000 }
 }
 
-#[derive(Default, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Default, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct Misc {
+pub struct Misc<O = ()> {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parameters: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub executable_path: Option<String>,
 
-    #[serde(flatten, skip_serializing_if = "Option::is_none")]
-    pub other: Option<BTreeMap<String, Value>>,
+    #[serde(flatten)]
+    pub custom: O,
+}
+
+impl<O> Deref for Misc<O> {
+    type Target = O;
+    fn deref(&self) -> &Self::Target {
+        &self.custom
+    }
+}
+impl<O> DerefMut for Misc<O> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.custom
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -467,7 +539,7 @@ pub enum Encoding {
 
 #[derive(Default, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct Runtime {
+pub struct Runtime<O = ()> {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub builtin: BTreeMap<Cow<'static, str>, Status>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -491,13 +563,25 @@ pub struct Runtime {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
 
-    #[serde(flatten, skip_serializing_if = "Option::is_none")]
-    pub other: Option<BTreeMap<String, Value>>,
+    #[serde(flatten)]
+    pub custom: O
+}
+
+impl<O> Deref for Runtime<O> {
+    type Target = O;
+    fn deref(&self) -> &Self::Target {
+        &self.custom
+    }
+}
+impl<O> DerefMut for Runtime<O> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.custom
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct Semantic {
+pub struct Semantic<O = ()> {
     #[serde(default = "default_true", skip_serializing_if = "enabled")]
     pub enable: bool,
     #[serde(default = "default_true", skip_serializing_if = "enabled")]
@@ -507,10 +591,21 @@ pub struct Semantic {
     #[serde(default = "default_true", skip_serializing_if = "enabled")]
     pub variable: bool,
 
-    #[serde(flatten, skip_serializing_if = "Option::is_none")]
-    pub other: Option<BTreeMap<String, Value>>,
+    #[serde(flatten)]
+    pub custom: O,
 }
-impl Default for Semantic {
+impl<O> Deref for Semantic<O> {
+    type Target = O;
+    fn deref(&self) -> &Self::Target {
+        &self.custom
+    }
+}
+impl<O> DerefMut for Semantic<O> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.custom
+    }
+}
+impl<O: Default> Default for Semantic<O> {
     fn default() -> Self {
         Self {
             enable: true,
@@ -518,42 +613,64 @@ impl Default for Semantic {
             keyword: false,
             variable: true,
 
-            other: None,
+            custom: Default::default(),
         }
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct SignatureHelp {
+pub struct SignatureHelp<O = ()> {
     #[serde(default = "default_true", skip_serializing_if = "enabled")]
     pub enable: bool,
 
-    #[serde(flatten, skip_serializing_if = "Option::is_none")]
-    pub other: Option<BTreeMap<String, Value>>,
+    #[serde(flatten)]
+    pub custom: O,
 }
-impl Default for SignatureHelp {
+impl<O> Deref for SignatureHelp<O> {
+    type Target = O;
+    fn deref(&self) -> &Self::Target {
+        &self.custom
+    }
+}
+impl<O> DerefMut for SignatureHelp<O> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.custom
+    }
+}
+impl<O: Default> Default for SignatureHelp<O> {
     fn default() -> Self {
         Self {
             enable: true,
-            other: None,
+            custom: Default::default(),
         }
     }
 }
 
 #[derive(Default, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct Spell {
+pub struct Spell<O = ()> {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dict: Vec<String>,
 
-    #[serde(flatten, skip_serializing_if = "Option::is_none")]
-    pub other: Option<BTreeMap<String, Value>>,
+    #[serde(flatten)]
+    pub custom: O,
+}
+impl<O> Deref for Spell<O> {
+    type Target = O;
+    fn deref(&self) -> &Self::Target {
+        &self.custom
+    }
+}
+impl<O> DerefMut for Spell<O> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.custom
+    }
 }
 
 #[derive(Default, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct Type {
+pub struct Type<O = ()> {
     #[serde(default, skip_serializing_if = "disabled")]
     pub cast_number_to_integer: bool,
     #[serde(default, skip_serializing_if = "disabled")]
@@ -561,33 +678,55 @@ pub struct Type {
     #[serde(default, skip_serializing_if = "disabled")]
     pub weak_union_check: bool,
 
-    #[serde(flatten, skip_serializing_if = "Option::is_none")]
-    pub other: Option<BTreeMap<String, Value>>,
+    #[serde(flatten)]
+    pub custom: O,
+}
+impl<O> Deref for Type<O> {
+    type Target = O;
+    fn deref(&self) -> &Self::Target {
+        &self.custom
+    }
+}
+impl<O> DerefMut for Type<O> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.custom
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct Window {
+pub struct Window<O = ()> {
     #[serde(default = "default_true", skip_serializing_if = "enabled")]
     pub progress_bar: bool,
     #[serde(default = "default_true", skip_serializing_if = "enabled")]
     pub status_bar: bool,
 
-    #[serde(flatten, skip_serializing_if = "Option::is_none")]
-    pub other: Option<BTreeMap<String, Value>>,
+    #[serde(flatten)]
+    pub custom: O,
+}
+impl<O> Deref for Window<O> {
+    type Target = O;
+    fn deref(&self) -> &Self::Target {
+        &self.custom
+    }
+}
+impl<O> DerefMut for Window<O> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.custom
+    }
 }
 
-impl Default for Window {
+impl<O: Default> Default for Window<O> {
     fn default() -> Self {
         Self {
             progress_bar: true,
             status_bar: true,
-            other: None,
+            custom: Default::default(),
         }
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub enum CheckThirdParty {
     Ask,
     Apply,
@@ -663,9 +802,9 @@ impl<'de> Deserialize<'de> for CheckThirdParty {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct Workspace {
+pub struct Workspace<O = ()> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub check_third_party: Option<CheckThirdParty>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -675,13 +814,13 @@ pub struct Workspace {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub library: Vec<String>,
     #[serde(
-        default = "Workspace::max_preload",
-        skip_serializing_if = "Self::max_preload_validate"
+        default = "workspace_serde::max_preload",
+        skip_serializing_if = "workspace_serde::max_preload_validate"
     )]
     pub max_preload: usize,
     #[serde(
-        default = "Workspace::preload_file_size",
-        skip_serializing_if = "Self::preload_file_size_validate"
+        default = "workspace_serde::preload_file_size",
+        skip_serializing_if = "workspace_serde::preload_file_size_validate"
     )]
     pub preload_file_size: usize,
     #[serde(default = "default_true", skip_serializing_if = "enabled")]
@@ -690,29 +829,31 @@ pub struct Workspace {
     pub user_third_party: Vec<String>,
 
     /// Collect remaining user defined data
-    #[serde(flatten, skip_serializing_if="Option::is_none")]
-    pub other: Option<BTreeMap<Cow<'static, str>, Value>>,
+    #[serde(flatten)]
+    pub custom: O,
 }
 
-impl Workspace {
-    const fn max_preload() -> usize {
-        5000
-    }
-
-    const fn preload_file_size() -> usize {
-        500
-    }
-
-    const fn max_preload_validate(ctx: &usize) -> bool {
-        *ctx == 5000
-    }
-
-    const fn preload_file_size_validate(ctx: &usize) -> bool {
-        *ctx == 500
+impl<O> Deref for Workspace<O> {
+    type Target = O;
+    fn deref(&self) -> &Self::Target {
+        &self.custom
     }
 }
 
-impl Default for Workspace {
+impl<O> DerefMut for Workspace<O> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.custom
+    }
+}
+
+mod workspace_serde {
+    pub const fn max_preload() -> usize { 5000 }
+    pub const fn preload_file_size() -> usize { 500 }
+    pub const fn max_preload_validate(ctx: &usize) -> bool { *ctx == 5000 }
+    pub const fn preload_file_size_validate(ctx: &usize) -> bool { *ctx == 500 }
+}
+
+impl<O: Default> Default for Workspace<O> {
     fn default() -> Self {
         Self {
             check_third_party: None,
@@ -723,52 +864,253 @@ impl Default for Workspace {
             preload_file_size: 500,
             use_git_ignore: true,
             user_third_party: Vec::default(),
-
-            other: None,
+            custom: Default::default(),
         }
     }
 }
 
-#[derive(Default, Debug, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LuaRc {
-    #[serde(rename = "$schema", skip_serializing_if = "Option::is_none")]
-    pub schema: Option<String>,
+macro_rules! rc {
+    {
+        $(#[$attr: meta])*
+        pub struct $name: ident < $($letter: ident),+; O > { $($rest: tt)* }
+    } => {
+        $(#[$attr])*
+        pub struct $name< $($letter = (),)+ O = ()> { $($rest)* }
 
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub addon_manager: Option<AddonManager>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub completion: Option<Completion>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub diagnostics: Option<Diagnostics>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub doc: Option<Doc>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub format: Option<Format>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub hint: Option<Hint>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub hover: Option<Hover>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub misc: Option<Misc>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub runtime: Option<Runtime>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub semantic: Option<Semantic>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub signature_help: Option<SignatureHelp>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub spell: Option<Spell>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub r#type: Option<Type>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub workspace: Option<Workspace>,
+        impl<$($letter,)* O> Deref for LuaRc<$($letter,)* O> {
+            type Target = O;
 
-    #[serde(flatten, skip_serializing_if="Option::is_none")]
-    pub other: Option<Value>,
+            fn deref(&self) -> &Self::Target {
+                &self.custom
+            }
+        }
+
+        impl<$($letter,)* O> DerefMut for LuaRc<$($letter,)* O> {
+            fn deref_mut(&mut self) -> &mut Self::Target {
+                &mut self.custom
+            }
+        }
+
+        impl<$($letter,)* O> LuaRc<$($letter,)* O>
+            where
+                $($letter: Serialize + DeserializeOwned,)*
+                O: Default + Serialize + DeserializeOwned,
+        {
+            /// Attempt to detect a luarc file and create an instance
+            ///
+            /// If the file is not found a new default instance and file are created.
+            ///
+            /// **Warning**: Since LuaRc allows for flattened type parsing from the remaining
+            /// fields from each section, Using this method directly will required you to specify
+            /// each type. USE [[`LuaRc::extend`]] instead
+            ///
+            /// # Args
+            ///     - path: The full path to the new luarc file, including the filename
+            pub fn detect_as(path: impl AsRef<Path>) -> Result<Self, Error> {
+                let path = path.as_ref();
+                if path.exists() {
+                    Self::read_as(path)
+                } else {
+                    Self::new_as(path)
+                }
+            }
+
+            /// Write the instance to a given path
+            pub fn write(&self, path: impl AsRef<Path>) -> Result<(), Error> {
+                Ok(std::fs::write(path, serde_json::to_string_pretty(self)?)?)
+            }
+
+            /// Read a LuaRc instance from a file
+            ///
+            /// Fails if the file does not exist.
+            ///
+            /// **Warning**: Since LuaRc allows for flattened type parsing from the remaining
+            /// fields from each section, Using this method directly will required you to specify
+            /// each type. USE [[`LuaRc::extend`]] instead
+            ///
+            /// # Args
+            ///     - path: The full path to the new luarc file, including the filename
+            pub fn read_as(path: impl AsRef<Path>) -> Result<Self, Error> {
+                let path = path.as_ref();
+                let bytes = std::fs::read(path)?;
+                Ok(serde_json::from_slice(&bytes)?)
+            }
+
+            /// Create a new LuaRc instance from a file
+            ///
+            /// If the file does not exist a new file is created.
+            ///
+            /// **Warning**: Since LuaRc allows for flattened type parsing from the remaining
+            /// fields from each section, Using this method directly will required you to specify
+            /// each type. USE [[`LuaRc::extend`]] instead
+            ///
+            /// # Args
+            ///     - path: The full path to the new luarc file, including the filename
+            pub fn new_as(path: impl AsRef<Path>) -> Result<Self, Error> {
+                // Attempt to read sha1 from cloned addon repositories
+                let path = path.as_ref().to_path_buf();
+                let lock = Default::default();
+
+                if let Some(parent) = path.parent() {
+                    if !parent.exists() {
+                        std::fs::create_dir_all(parent)?;
+                    }
+                }
+
+                log::debug!("creating luarc at {}", path.display());
+                std::fs::write(&path, serde_json::to_string_pretty(&lock)?)?;
+
+                Ok(lock)
+            }
+        }
+
+        impl<$($letter,)* O: Default> Default for LuaRc<$($letter,)* O> {
+            fn default() -> Self {
+                Self {
+                    schema: None,
+                    addon_manager: None,
+                    completion: None,
+                    diagnostics: None,
+                    doc: None,
+                    format: None,
+                    hint: None,
+                    hover: None,
+                    misc: None,
+                    runtime: None,
+                    semantic: None,
+                    signature_help: None,
+                    spell: None,
+                    r#type: None,
+                    workspace: None,
+                    custom: Default::default(),
+                }
+            }
+        }
+
+        impl<$($letter,)* O> std::fmt::Debug for LuaRc<$($letter,)* O>
+        where
+            $($letter: std::fmt::Debug,)*
+            O: std::fmt::Debug,
+        {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.debug_struct("LuaRc")
+                    .field("schema", &self.schema)
+                    .field("addon_manager", &self.addon_manager)
+                    .field("completion", &self.completion)
+                    .field("diagnostics", &self.diagnostics)
+                    .field("doc", &self.doc)
+                    .field("format", &self.format)
+                    .field("hint", &self.hint)
+                    .field("hover", &self.hover)
+                    .field("misc", &self.misc)
+                    .field("runtime", &self.runtime)
+                    .field("semantic", &self.semantic)
+                    .field("signature_help", &self.signature_help)
+                    .field("spell", &self.spell)
+                    .field("type", &self.r#type)
+                    .field("workspace", &self.workspace)
+                    .field("other", &self.custom)
+                    .finish()
+            }
+        }
+
+        impl<$($letter,)* O> PartialEq for LuaRc<$($letter,)* O>
+            where
+                $($letter: PartialEq,)*
+                O: PartialEq,
+        {
+            #[allow(clippy::unit_arg)]
+            fn eq(&self, other: &Self) -> bool {
+                self.schema.eq(&other.schema)
+                    && self.addon_manager.eq(&other.addon_manager)
+                    && self.completion.eq(&other.completion)
+                    && self.diagnostics.eq(&other.diagnostics)
+                    && self.doc.eq(&other.doc)
+                    && self.format.eq(&other.format)
+                    && self.hint.eq(&other.hint)
+                    && self.hover.eq(&other.hover)
+                    && self.misc.eq(&other.misc)
+                    && self.runtime.eq(&other.runtime)
+                    && self.semantic.eq(&other.semantic)
+                    && self.signature_help.eq(&other.signature_help)
+                    && self.spell.eq(&other.spell)
+                    && self.r#type.eq(&other.r#type)
+                    && self.workspace.eq(&other.workspace)
+                    && self.custom.eq(&other.custom)
+            }
+        }
+
+        pub struct LuaRcBuilder<$($letter = (),)* O = ()> {
+            _m: PhantomData<($($letter,)* O)>
+        }
+
+        impl<$($letter,)* O> LuaRcBuilder<$($letter,)* O>
+            where
+                $($letter: Serialize + DeserializeOwned,)*
+                O: Default + Serialize + DeserializeOwned,
+        {
+            pub fn detect(self, path: impl AsRef<Path>) -> Result<LuaRc<$($letter,)* O>, Error> {
+                LuaRc::detect_as(path)
+            }
+
+            #[allow(clippy::new_ret_no_self)]
+            pub fn new(self, path: impl AsRef<Path>) -> Result<LuaRc<$($letter,)* O>, Error> {
+                LuaRc::new_as(path)
+            }
+
+            pub fn read(self, path: impl AsRef<Path>) -> Result<LuaRc<$($letter,)* O>, Error> {
+                LuaRc::read_as(path)
+            }
+        }
+    }
+}
+
+rc! {
+    #[derive(Serialize, Deserialize)]
+    #[serde(rename_all="camelCase")]
+    pub struct LuaRc<A, B, C, D, E, F, G, H, I, J, K, L, M, N; O> {
+        #[serde(rename = "$schema", skip_serializing_if = "Option::is_none")]
+        pub schema: Option<String>,
+
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub addon_manager: Option<AddonManager<A>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub completion: Option<Completion<B>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub diagnostics: Option<Diagnostics<C>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub doc: Option<Doc<D>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub format: Option<Format<E>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub hint: Option<Hint<F>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub hover: Option<Hover<G>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub misc: Option<Misc<H>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub runtime: Option<Runtime<I>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub semantic: Option<Semantic<J>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub signature_help: Option<SignatureHelp<K>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub spell: Option<Spell<L>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub r#type: Option<Type<M>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub workspace: Option<Workspace<N>>,
+
+        #[serde(flatten)]
+        pub custom: O,
+    }
 }
 
 impl LuaRc {
+    pub fn extend() -> LuaRcBuilder {
+        LuaRcBuilder::default()
+    }
+
     /// Attempt to detect a luarc file and create an instance
     ///
     /// If the file is not found a new default instance and file are created.
@@ -776,20 +1118,7 @@ impl LuaRc {
     /// # Args
     ///     - path: The full path to the new luarc file, including the filename
     pub fn detect(path: impl AsRef<Path>) -> Result<Self, Error> {
-        let path = path.as_ref();
-        if path.exists() {
-            Self::read(path)
-        } else {
-            Self::new(path)
-        }
-    }
-
-    /// Write the instance to a given path
-    pub fn write(&self, path: impl AsRef<Path>) -> Result<(), Error> {
-        Ok(std::fs::write(
-            path,
-            serde_json::to_string_pretty(self)?,
-        )?)
+        Self::detect_as(path)
     }
 
     /// Read a LuaRc instance from a file
@@ -798,10 +1127,8 @@ impl LuaRc {
     ///
     /// # Args
     ///     - path: The full path to the new luarc file, including the filename
-    fn read(path: impl AsRef<Path>) -> Result<Self, Error> {
-        let path = path.as_ref();
-        let bytes = std::fs::read(path)?;
-        Ok(serde_json::from_slice(&bytes)?)
+    pub fn read(path: impl AsRef<Path>) -> Result<Self, Error> {
+        Self::read_as(path)
     }
 
     /// Create a new LuaRc instance from a file
@@ -810,18 +1137,47 @@ impl LuaRc {
     ///
     /// # Args
     ///     - path: The full path to the new luarc file, including the filename
-    fn new(path: impl AsRef<Path>) -> Result<Self, Error> {
-        // Attempt to read sha1 from cloned addon repositories
-        let path = path.as_ref().to_path_buf();
-        let lock = Default::default();
-
-        if !path.exists() {
-            std::fs::create_dir_all(&path)?;
-        }
-
-        log::debug!("creating luarc at {}", path.display());
-        std::fs::write(&path, serde_json::to_string_pretty(&lock)?)?;
-
-        Ok(lock)
+    pub fn new(path: impl AsRef<Path>) -> Result<Self, Error> {
+        Self::new_as(path)
     }
+}
+
+impl Default for LuaRcBuilder {
+    fn default() -> Self {
+        Self { _m: PhantomData }
+    }
+}
+
+#[allow(clippy::type_complexity)]
+impl<A, B, C, D, E, F, G, H, I, J, K, L, M, N, O> LuaRcBuilder<A, B, C, D, E, F, G, H, I, J, K, L, M, N, O> {
+    #[inline]
+    pub fn addon_manager<Z>(self) -> LuaRcBuilder<Z, B, C, D, E, F, G, H, I, J, K, L, M, N, O> { LuaRcBuilder { _m: PhantomData } }
+    #[inline]
+    pub fn completion<Z>(self) -> LuaRcBuilder<A, Z, C, D, E, F, G, H, I, J, K, L, M, N, O> { LuaRcBuilder { _m: PhantomData } }
+    #[inline]
+    pub fn diagnostics<Z>(self) -> LuaRcBuilder<A, B, Z, D, E, F, G, H, I, J, K, L, M, Z, O> { LuaRcBuilder { _m: PhantomData } }
+    #[inline]
+    pub fn doc<Z>(self) -> LuaRcBuilder<A, B, C, Z, E, F, G, H, I, J, K, L, M, N, O> { LuaRcBuilder { _m: PhantomData } }
+    #[inline]
+    pub fn format<Z>(self) -> LuaRcBuilder<A, B, C, D, Z, F, G, H, I, J, K, L, M, N, O> { LuaRcBuilder { _m: PhantomData } }
+    #[inline]
+    pub fn hint<Z>(self) -> LuaRcBuilder<A, B, C, D, E, Z, G, H, I, J, K, L, M, N, O> { LuaRcBuilder { _m: PhantomData } }
+    #[inline]
+    pub fn hover<Z>(self) -> LuaRcBuilder<A, B, C, D, E, F, Z, H, I, J, K, L, M, N, O> { LuaRcBuilder { _m: PhantomData } }
+    #[inline]
+    pub fn misc<Z>(self) -> LuaRcBuilder<A, B, C, D, E, F, G, Z, I, J, K, L, M, N, O> { LuaRcBuilder { _m: PhantomData } }
+    #[inline]
+    pub fn runtime<Z>(self) -> LuaRcBuilder<A, B, C, D, E, F, G, H, Z, J, K, L, M, N, O> { LuaRcBuilder { _m: PhantomData } }
+    #[inline]
+    pub fn semantic<Z>(self) -> LuaRcBuilder<A, B, C, D, E, F, G, H, I, Z, K, L, M, N, O> { LuaRcBuilder { _m: PhantomData } }
+    #[inline]
+    pub fn signature_help<Z>(self) -> LuaRcBuilder<A, B, C, D, E, F, G, H, I, J, Z, L, M, N, O> { LuaRcBuilder { _m: PhantomData } }
+    #[inline]
+    pub fn spell<Z>(self) -> LuaRcBuilder<A, B, C, D, E, F, G, H, I, J, K, Z, M, N, O> { LuaRcBuilder { _m: PhantomData } }
+    #[inline]
+    pub fn ty<Z>(self) -> LuaRcBuilder<A, B, C, D, E, F, G, H, I, J, K, L, Z, N, O> { LuaRcBuilder { _m: PhantomData } }
+    #[inline]
+    pub fn workspace<Z>(self) -> LuaRcBuilder<A, B, C, D, E, F, G, H, I, J, K, L, M, Z, O> { LuaRcBuilder { _m: PhantomData } }
+    #[inline]
+    pub fn root<Z>(self) -> LuaRcBuilder<A, B, C, D, E, F, G, H, I, J, K, L, M, N, Z> { LuaRcBuilder { _m: PhantomData } }
 }
