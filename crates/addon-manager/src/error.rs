@@ -1,11 +1,15 @@
+use crate::Git;
+
 #[derive(Debug)]
 pub enum Error {
     Io(std::io::Error),
     Json(serde_json::Error),
     Url(url::ParseError),
 
-    UnsupportedAddon(String),
-    UnsupportedSource(String),
+    InvalidHost(String),
+    InvalidSource(String),
+
+    Git(Git, String),
 }
 
 impl std::fmt::Display for Error {
@@ -15,8 +19,16 @@ impl std::fmt::Display for Error {
             Self::Json(err) => write!(f, "json: {err}"),
             Self::Url(err) => write!(f, "url: {err}"),
 
-            Self::UnsupportedAddon(name) => write!(f, "unsupported addon '{name}'"),
-            Self::UnsupportedSource(name) => write!(f, "unsupported addon source '{name}'"),
+            Self::InvalidHost(name) => write!(f, "invalid host '{name}': expected 'github.com'"),
+            Self::InvalidSource(message) => write!(f, "invalid source: {message}"),
+
+            Self::Git(git, message) => match git {
+                Git::Clone(url) => write!(f, "failed to clone repository({url}): {message}"),
+                Git::Pull => write!(f, "failed to pull repository: {message}"),
+                Git::Fetch => write!(f, "failed to fetch repository changes: {message}"),
+                Git::Reset => write!(f, "failed to reset repository: {message}"),
+                Git::Hash => write!(f, "failed to parse repository hash: {message}"),
+            },
         }
     }
 }
@@ -38,5 +50,16 @@ impl From<serde_json::Error> for Error {
 impl From<url::ParseError> for Error {
     fn from(value: url::ParseError) -> Self {
         Self::Url(value)
+    }
+}
+
+impl From<luarc::Error> for Error {
+    fn from(value: luarc::Error) -> Self {
+        use luarc::Error::*;
+
+        match value {
+            Io(io) => Self::Io(io),
+            Json(json) => Self::Json(json),
+        }
     }
 }

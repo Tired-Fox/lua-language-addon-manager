@@ -73,7 +73,8 @@ fn main() -> Result<(), Error> {
         // All the fields found in the `Workspace` type will now be parsed as if they are at the same level
         // as the default Workspace's fields
         .workspace::<Workspace>()
-        .detect(PathBuf::from("examples/customrc.json"))?;
+        .read(PathBuf::from("examples/customrc.json"))?
+        .unwrap_or_default();
 
     if let Some(workspace) = rc.workspace.as_ref() { 
         println!("{workspace:#?}");

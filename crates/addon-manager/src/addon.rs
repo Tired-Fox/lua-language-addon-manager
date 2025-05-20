@@ -1,146 +1,220 @@
-use std::{borrow::Cow, ops::{BitAnd, BitAndAssign}, str::FromStr};
-
+use std::{
+    path::Path,
+    str::FromStr,
+};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use crate::Error;
+use crate::{Error, Git};
 
-#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum Target {
-    #[default]
-    LuaCats,
-    Github,
-}
-
-impl FromStr for Target {
-    type Err = Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if let Some(url) = s.strip_prefix("git:") {
-            let url = Url::parse(url)?;
-            match url.host_str() {
-                Some("github.com") => Ok(Target::Github),
-                Some(other) => Err(Error::UnsupportedSource(other.to_string())),
-                _ => Err(Error::UnsupportedSource(s.to_string())),
-            }
-        } else {
-            Ok(Target::LuaCats)
-        }
-    }
-}
-
-#[derive(Default, Debug, Clone, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Default, Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct Addon {
-    pub src: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub checksum: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub branch: Option<String>,
-    pub target: Target,
+    pub domain: String,
+    pub host: String,
+    #[serde(rename = "repository")]
+    pub repo: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hash: Option<String>,
 }
 
 impl Addon {
-    pub fn cats(name: String, checksum: Option<String>, branch: Option<String>) -> Self {
+    pub fn luacats(
+        repo: impl std::fmt::Display,
+        version: Option<String>,
+        hash: Option<String>,
+    ) -> Self {
+        Self::new("github.com", "LuaCATS", repo, version, hash)
+    }
+
+    pub fn new(
+        domain: impl std::fmt::Display,
+        host: impl std::fmt::Display,
+        repo: impl std::fmt::Display,
+        version: Option<String>,
+        hash: Option<String>,
+    ) -> Self {
         Self {
-            src: name,
-            checksum,
-            branch,
-            target: Target::LuaCats,
+            domain: domain.to_string(),
+            host: host.to_string(),
+            repo: repo.to_string(),
+            version,
+            hash,
         }
     }
 
-    pub fn name(&self) -> Cow<'static, str> {
-        match self.target {
-            Target::LuaCats => self.src.clone().into(),
-            Target::Github => {
-                let url = Url::parse(self.src.as_str()).unwrap();
-                url.path_segments()
-                    .unwrap()
-                    .nth(1)
-                    .unwrap()
-                    .to_string()
-                    .into()
-            }
-        }
+    pub fn is_luacats(&self) -> bool {
+        self.host.as_str() == "LuaCATS"
     }
 
-    pub fn clone_url(&self) -> String {
-        match self.target {
-            Target::LuaCats => format!("https://github.com/LuaCATS/{}.git", self.src),
-            Target::Github => self.src.to_string(),
-        }
+    /// Check if the addon exists in the base bath
+    ///
+    /// The base path is where a collection of addons lives, not a single addon
+    pub fn exists(&mut self, path: impl AsRef<Path>) -> bool {
+        path.as_ref().to_path_buf().join(&self.repo).exists()
     }
-}
 
-impl BitAnd for Addon {
-    type Output = Self;
-    fn bitand(self, rhs: Self) -> Self::Output {
-        Self {
-            src: rhs.src,
-            target: rhs.target,
-            branch: rhs.branch.or(self.branch),
-            checksum: rhs.checksum.or(self.checksum),
-        }
+    /// Reset the addons repository removing all changes
+    pub fn reset(&mut self, path: impl AsRef<Path>) -> Result<(), Error> {
+        let path = path.as_ref().to_path_buf().join(&self.repo);
+        Git::Reset.run(&path)?;
+
+        let hash = Git::Hash.run(&path).map(|v| v.trim().to_string())?;
+        self.hash = Some(hash);
+
+        Ok(())
     }
-}
 
-impl BitAndAssign for Addon {
-    fn bitand_assign(&mut self, rhs: Self) {
-        self.src = rhs.src.clone();
-        self.target = rhs.target;
+    /// Clone the addon and update the hash
+    pub fn download(&mut self, path: impl AsRef<Path>) -> Result<(), Error> {
+        let path = path.as_ref().to_path_buf().join(&self.repo);
+        Git::Clone(self.to_string()).run(&path)?;
 
-        if let Some(branch) = rhs.branch.as_ref() {
-            self.branch = Some(branch.to_string());
-        }
+        let hash = Git::Hash.run(&path).map(|v| v.trim().to_string())?;
+        self.hash = Some(hash);
 
-        if let Some(checksum) = rhs.checksum.as_ref() {
-            self.checksum = Some(checksum.to_string());
-        }
+        Ok(())
     }
-}
 
-impl BitAndAssign<&Self> for Addon {
-    fn bitand_assign(&mut self, rhs: &Self) {
-        self.src = rhs.src.clone();
-        self.target = rhs.target;
+    /// Pull the addon and update the hash
+    pub fn pull(&mut self, path: impl AsRef<Path>) -> Result<(), Error> {
+        let path = path.as_ref().to_path_buf().join(&self.repo);
+        Git::Pull.run(&path)?;
 
-        if let Some(branch) = rhs.branch.as_ref() {
-            self.branch = Some(branch.clone());
-        }
+        let hash = Git::Hash.run(&path).map(|v| v.trim().to_string())?;
+        self.hash = Some(hash);
 
-        if let Some(checksum) = rhs.checksum.as_ref() {
-            self.checksum = Some(checksum.clone());
-        }
+        Ok(())
     }
-}
 
-impl<S: AsRef<str>> From<S> for Addon {
-    fn from(s: S) -> Self {
-        let mut source = s.as_ref();
-        let mut checksum = None;
-
-        if source.contains('@') {
-            let (f, s) = source.split_once('@').unwrap();
-            source = f;
-            checksum = Some(s.to_string());
-        }
-
-        Self {
-            target: Target::from_str(source).unwrap(),
-            src: source.to_string(),
-            checksum,
-            branch: None,
-        }
+    /// Fetch latest changes from git without pulling
+    pub fn fetch(&self, path: impl AsRef<Path>) -> Result<(), Error> {
+        let path = path.as_ref().to_path_buf().join(&self.repo);
+        Git::Fetch.run(path)?;
+        Ok(())
     }
 }
 
 impl std::fmt::Display for Addon {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.src)?;
-        if let Some(checksum) = self.checksum.as_deref() {
-            write!(f, "@{checksum}")?;
+        write!(f, "https://github.com/{}/{}", self.host, self.repo)?;
+
+        if let Some(version) = self.version.as_deref() {
+            write!(f, "#{version}")?;
         }
+
         Ok(())
+    }
+}
+
+impl FromStr for Addon {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if let Some(s) = s.strip_prefix("git+") {
+            let url = if s.starts_with("http") {
+                Url::parse(s)?
+            } else {
+                Url::parse(&format!("https://{s}"))?
+            };
+            let host = url
+                .host_str()
+                .ok_or(Error::InvalidSource("missing host to repository".into()))?;
+
+            let mut segments = url.path_segments().ok_or(Error::InvalidSource(
+                "missing user/org and repostiory path segments".into(),
+            ))?;
+            let target = segments
+                .next()
+                .ok_or(Error::InvalidSource("missing user/org path segment".into()))?;
+            let repo = segments.next().ok_or(Error::InvalidSource(
+                "missing repository path segment".into(),
+            ))?;
+            Ok(Self::new(
+                host,
+                target,
+                repo,
+                url.fragment().map(ToString::to_string),
+                None,
+            ))
+        } else {
+            let (repo, digest) = s
+                .split_once("#")
+                .map(|(r, d)| (r, Some(d.to_string())))
+                .unwrap_or((s, None));
+            Ok(Self::luacats(repo, digest, None))
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::str::FromStr;
+
+    use crate::Addon;
+
+    #[test]
+    fn git_source() {
+        let src = Addon::from_str("git+github.com/LuaCATS/love2d");
+        assert!(src.is_ok());
+        let src = src.unwrap();
+        assert!(
+            src == Addon {
+                domain: "github.com".to_string(),
+                host: "LuaCATS".to_string(),
+                repo: "love2d".to_string(),
+                version: None,
+                hash: None,
+            }
+        );
+    }
+
+    #[test]
+    fn git_source_with_version() {
+        let src = Addon::from_str("git+github.com/LuaCATS/love2d#master");
+        assert!(src.is_ok());
+        let src = src.unwrap();
+        assert!(
+            src == Addon {
+                domain: "github.com".to_string(),
+                host: "LuaCATS".to_string(),
+                repo: "love2d".to_string(),
+                version: Some("master".to_string()),
+                hash: None,
+            }
+        );
+    }
+
+    #[test]
+    fn luacats_source() {
+        let src = Addon::from_str("love2d");
+        assert!(src.is_ok());
+        let src = src.unwrap();
+        assert!(
+            src == Addon {
+                domain: "github.com".to_string(),
+                host: "LuaCATS".to_string(),
+                repo: "love2d".to_string(),
+                version: None,
+                hash: None,
+            }
+        );
+    }
+
+    #[test]
+    fn luacats_source_with_version() {
+        let src = Addon::from_str("love2d#master");
+        assert!(src.is_ok());
+        let src = src.unwrap();
+        assert!(
+            src == Addon {
+                domain: "github.com".to_string(),
+                host: "LuaCATS".to_string(),
+                repo: "love2d".to_string(),
+                version: Some("master".to_string()),
+                hash: None
+            }
+        );
     }
 }

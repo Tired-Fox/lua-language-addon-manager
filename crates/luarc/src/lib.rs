@@ -91,9 +91,9 @@ pub struct Completion<O = ()> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub keyword_snippet: Option<Snippet>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub postfix: Option<String>,
+    pub postfix: Option<Cow<'static, str>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub require_separator: Option<String>,
+    pub require_separator: Option<Cow<'static, str>>,
     #[serde(default = "default_true", skip_serializing_if = "enabled")]
     pub show_params: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -227,9 +227,9 @@ pub struct Diagnostics<O = ()> {
     pub disable: Vec<Diagnostic>,
     //pub disable: Diagnostic
     #[serde(default = "Default::default", skip_serializing_if = "Vec::is_empty")]
-    pub disable_scheme: Vec<String>,
+    pub disable_scheme: Vec<Cow<'static, str>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub globals: Vec<String>,
+    pub globals: Vec<Cow<'static, str>>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub group_file_status: BTreeMap<DiagnosticGroup, FileStatus>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -243,7 +243,7 @@ pub struct Diagnostics<O = ()> {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub severity: BTreeMap<Diagnostic, Severity>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub unused_local_exclude: Vec<String>,
+    pub unused_local_exclude: Vec<Cow<'static, str>>,
     #[serde(
         default = "diagnostic_serde::workspace_delay",
         skip_serializing_if = "diagnostic_serde::three_minute_validate"
@@ -310,13 +310,13 @@ impl<O> DerefMut for Diagnostics<O> {
 #[serde(rename_all = "camelCase")]
 pub struct Doc<O = ()> {
     #[serde(default, skip_serializing_if = "HashSet::is_empty")]
-    pub package_name: HashSet<String>,
+    pub package_name: HashSet<Cow<'static, str>>,
 
     #[serde(default, skip_serializing_if = "HashSet::is_empty")]
-    pub private_name: HashSet<String>,
+    pub private_name: HashSet<Cow<'static, str>>,
 
     #[serde(default, skip_serializing_if = "HashSet::is_empty")]
-    pub protected_name: HashSet<String>,
+    pub protected_name: HashSet<Cow<'static, str>>,
 
     #[serde(flatten)]
     pub custom: O,
@@ -501,9 +501,9 @@ mod hover_serde {
 #[serde(rename_all = "camelCase")]
 pub struct Misc<O = ()> {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub parameters: Vec<String>,
+    pub parameters: Vec<Cow<'static, str>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub executable_path: Option<String>,
+    pub executable_path: Option<Cow<'static, str>>,
 
     #[serde(flatten)]
     pub custom: O,
@@ -545,23 +545,23 @@ pub struct Runtime<O = ()> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_encoding: Option<Encoding>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub meta: Option<String>,
+    pub meta: Option<Cow<'static, str>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub nonstandard_symbol: Vec<String>,
+    pub nonstandard_symbol: Vec<Cow<'static, str>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub path: Vec<String>,
+    pub path: Vec<Cow<'static, str>>,
     #[serde(default, skip_serializing_if = "disabled")]
     pub path_strict: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub plugin: Option<String>,
+    pub plugin: Option<Cow<'static, str>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub plugin_args: Vec<String>,
+    pub plugin_args: Vec<Cow<'static, str>>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub special: BTreeMap<Cow<'static, str>, Cow<'static, str>>,
     #[serde(default, skip_serializing_if = "disabled")]
     pub unicode_name: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub version: Option<String>,
+    pub version: Option<Cow<'static, str>>,
 
     #[serde(flatten)]
     pub custom: O
@@ -651,7 +651,7 @@ impl<O: Default> Default for SignatureHelp<O> {
 #[serde(rename_all = "camelCase")]
 pub struct Spell<O = ()> {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub dict: Vec<String>,
+    pub dict: Vec<Cow<'static, str>>,
 
     #[serde(flatten)]
     pub custom: O,
@@ -808,11 +808,11 @@ pub struct Workspace<O = ()> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub check_third_party: Option<CheckThirdParty>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub ignore_dir: Vec<String>,
+    pub ignore_dir: Vec<Cow<'static, str>>,
     #[serde(default = "default_true", skip_serializing_if = "enabled")]
     pub ignore_submodules: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub library: Vec<String>,
+    pub library: Vec<Cow<'static, str>>,
     #[serde(
         default = "workspace_serde::max_preload",
         skip_serializing_if = "workspace_serde::max_preload_validate"
@@ -826,7 +826,7 @@ pub struct Workspace<O = ()> {
     #[serde(default = "default_true", skip_serializing_if = "enabled")]
     pub use_git_ignore: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub user_third_party: Vec<String>,
+    pub user_third_party: Vec<Cow<'static, str>>,
 
     /// Collect remaining user defined data
     #[serde(flatten)]
@@ -896,25 +896,6 @@ macro_rules! rc {
                 $($letter: Serialize + DeserializeOwned,)*
                 O: Default + Serialize + DeserializeOwned,
         {
-            /// Attempt to detect a luarc file and create an instance
-            ///
-            /// If the file is not found a new default instance and file are created.
-            ///
-            /// **Warning**: Since LuaRc allows for flattened type parsing from the remaining
-            /// fields from each section, Using this method directly will required you to specify
-            /// each type. USE [[`LuaRc::extend`]] instead
-            ///
-            /// # Args
-            ///     - path: The full path to the new luarc file, including the filename
-            pub fn detect_as(path: impl AsRef<Path>) -> Result<Self, Error> {
-                let path = path.as_ref();
-                if path.exists() {
-                    Self::read_as(path)
-                } else {
-                    Self::new_as(path)
-                }
-            }
-
             /// Write the instance to a given path
             pub fn write(&self, path: impl AsRef<Path>) -> Result<(), Error> {
                 Ok(std::fs::write(path, serde_json::to_string_pretty(self)?)?)
@@ -922,45 +903,25 @@ macro_rules! rc {
 
             /// Read a LuaRc instance from a file
             ///
-            /// Fails if the file does not exist.
+            /// # Args
+            ///     - path: The full path to the new luarc file, including the filename
+            ///
+            /// # Returns
+            ///     - `Err`: when it fails to parse the json
+            ///     - `Ok(None)`: when no file was found
+            ///     - `Ok(Some(_))`: when the file was found and it successfully parsed the json
             ///
             /// **Warning**: Since LuaRc allows for flattened type parsing from the remaining
             /// fields from each section, Using this method directly will required you to specify
             /// each type. USE [[`LuaRc::extend`]] instead
-            ///
-            /// # Args
-            ///     - path: The full path to the new luarc file, including the filename
-            pub fn read_as(path: impl AsRef<Path>) -> Result<Self, Error> {
+            pub fn read_as(path: impl AsRef<Path>) -> Result<Option<Self>, Error> {
                 let path = path.as_ref();
-                let bytes = std::fs::read(path)?;
-                Ok(serde_json::from_slice(&bytes)?)
-            }
-
-            /// Create a new LuaRc instance from a file
-            ///
-            /// If the file does not exist a new file is created.
-            ///
-            /// **Warning**: Since LuaRc allows for flattened type parsing from the remaining
-            /// fields from each section, Using this method directly will required you to specify
-            /// each type. USE [[`LuaRc::extend`]] instead
-            ///
-            /// # Args
-            ///     - path: The full path to the new luarc file, including the filename
-            pub fn new_as(path: impl AsRef<Path>) -> Result<Self, Error> {
-                // Attempt to read sha1 from cloned addon repositories
-                let path = path.as_ref().to_path_buf();
-                let lock = Default::default();
-
-                if let Some(parent) = path.parent() {
-                    if !parent.exists() {
-                        std::fs::create_dir_all(parent)?;
+                match std::fs::read(path).ok() {
+                    None => Ok(None),
+                    Some(bytes) => {
+                        Ok(Some(serde_json::from_slice(&bytes)?))
                     }
                 }
-
-                log::debug!("creating luarc at {}", path.display());
-                std::fs::write(&path, serde_json::to_string_pretty(&lock)?)?;
-
-                Ok(lock)
             }
         }
 
@@ -1049,16 +1010,7 @@ macro_rules! rc {
                 $($letter: Serialize + DeserializeOwned,)*
                 O: Default + Serialize + DeserializeOwned,
         {
-            pub fn detect(self, path: impl AsRef<Path>) -> Result<LuaRc<$($letter,)* O>, Error> {
-                LuaRc::detect_as(path)
-            }
-
-            #[allow(clippy::new_ret_no_self)]
-            pub fn new(self, path: impl AsRef<Path>) -> Result<LuaRc<$($letter,)* O>, Error> {
-                LuaRc::new_as(path)
-            }
-
-            pub fn read(self, path: impl AsRef<Path>) -> Result<LuaRc<$($letter,)* O>, Error> {
+            pub fn read(self, path: impl AsRef<Path>) -> Result<Option<LuaRc<$($letter,)* O>>, Error> {
                 LuaRc::read_as(path)
             }
         }
@@ -1070,7 +1022,7 @@ rc! {
     #[serde(rename_all="camelCase")]
     pub struct LuaRc<A, B, C, D, E, F, G, H, I, J, K, L, M, N; O> {
         #[serde(rename = "$schema", skip_serializing_if = "Option::is_none")]
-        pub schema: Option<String>,
+        pub schema: Option<Cow<'static, str>>,
 
         #[serde(skip_serializing_if = "Option::is_none")]
         pub addon_manager: Option<AddonManager<A>>,
@@ -1111,34 +1063,14 @@ impl LuaRc {
         LuaRcBuilder::default()
     }
 
-    /// Attempt to detect a luarc file and create an instance
-    ///
-    /// If the file is not found a new default instance and file are created.
-    ///
-    /// # Args
-    ///     - path: The full path to the new luarc file, including the filename
-    pub fn detect(path: impl AsRef<Path>) -> Result<Self, Error> {
-        Self::detect_as(path)
-    }
-
     /// Read a LuaRc instance from a file
     ///
     /// Fails if the file does not exist.
     ///
     /// # Args
     ///     - path: The full path to the new luarc file, including the filename
-    pub fn read(path: impl AsRef<Path>) -> Result<Self, Error> {
+    pub fn read(path: impl AsRef<Path>) -> Result<Option<Self>, Error> {
         Self::read_as(path)
-    }
-
-    /// Create a new LuaRc instance from a file
-    ///
-    /// If the file does not exist a new file is created.
-    ///
-    /// # Args
-    ///     - path: The full path to the new luarc file, including the filename
-    pub fn new(path: impl AsRef<Path>) -> Result<Self, Error> {
-        Self::new_as(path)
     }
 }
 
