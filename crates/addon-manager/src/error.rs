@@ -7,7 +7,8 @@ pub enum Error {
     Url(url::ParseError),
 
     InvalidHost(String),
-    InvalidSource(String),
+    InvalidAddon(String),
+    InvalidConfigurationField(String),
 
     Git(Git, String),
 }
@@ -20,7 +21,8 @@ impl std::fmt::Display for Error {
             Self::Url(err) => write!(f, "url: {err}"),
 
             Self::InvalidHost(name) => write!(f, "invalid host '{name}': expected 'github.com'"),
-            Self::InvalidSource(message) => write!(f, "invalid source: {message}"),
+            Self::InvalidAddon(message) => write!(f, "invalid addon: {message}"),
+            Self::InvalidConfigurationField(field) => write!(f, "invalid configuration field '{field}'"),
 
             Self::Git(git, message) => match git {
                 Git::Clone(url) => write!(f, "failed to clone repository({url}): {message}"),

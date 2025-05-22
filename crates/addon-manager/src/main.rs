@@ -1,8 +1,8 @@
-use std::{collections::BTreeMap, str::FromStr};
+use std::collections::BTreeMap;
 
 use clap::{ArgAction, Parser, Subcommand};
-use llam::{Addon, Error};
-use luarc::LuaRc;
+use llam::{Addon, Error, Manager};
+use log::LevelFilter;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Parser)]
@@ -10,61 +10,53 @@ struct Cli {
     #[command(subcommand)]
     command: Command,
     #[arg(long, short, action = ArgAction::SetTrue)]
-    global: bool
+    global: bool,
 }
 
 #[derive(Debug, Subcommand)]
 enum Command {
     Add {
-        name: String
-    }
+        name: String,
+    },
+    #[clap(alias = "rm")]
+    Remove {
+        name: String,
+    },
+    Init,
 }
-
 
 #[derive(Default, Debug, Deserialize, Serialize)]
 struct Workspace {
-    #[serde(default, skip_serializing_if="BTreeMap::is_empty")]
-    addons: BTreeMap<String, Addon>
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    addons: BTreeMap<String, Addon>,
 }
 
-fn main() -> Result<(), Error> {
-    let base = std::env::current_dir()?;
-    let addons = base.join(".addons");
-    let luarc = base.join(".luarc.json");
+fn process(cli: Cli) -> Result<(), Error> {
+    let manager = Manager::new(std::env::current_dir()?);
 
-    let mut rc = LuaRc::extend()
-        .workspace::<Workspace>()
-        .read(&luarc)?
-        .ok_or(std::io::Error::new(std::io::ErrorKind::NotFound, ".luarc.json file not found"))?;
-
-    let cli = Cli::parse();
     match cli.command {
-        Command::Add { name } => {
-            let mut addon = Addon::from_str(&name)?;
-
-            if addon.exists(&addons) {
-                println!("Pulling addon's latest version at .addons/{}", &addon.repo);
-                addon.pull(&addons)?;
-            } else {
-                println!("Downloading addon to .addons/{}", &addon.repo);
-                addon.download(&addons)?;
-            }
-
-            if rc.workspace.is_none() {
-                rc.workspace = Some(Default::default());
-            }
-
-            let workspace = rc.workspace.as_mut().unwrap();
-
-            println!("Updating .luarc.json");
-            _ = workspace.addons.insert(addon.repo.clone(), addon);
-            let path = dunce::canonicalize(&addons)?.display().to_string();
-            if !workspace.user_third_party.iter().any(|v| v.as_ref() == ".addons" || v.as_ref() == path) {
-                workspace.user_third_party.push(".addons".into());
-            }
-            rc.write(&luarc)?;
-        }
+        Command::Init => manager.init()?,
+        Command::Add { name } => manager.add(name)?,
+        Command::Remove { name } => manager.remove(name)?,
     }
 
     Ok(())
+}
+
+fn main() {
+    env_logger::Builder::from_default_env()
+        .filter_level(LevelFilter::Info)
+        .format_timestamp(None)
+        .format_module_path(false)
+        .format_source_path(false)
+        .format_target(false)
+        .init();
+
+    let cli = Cli::parse();
+
+    if let Err(err) = process(cli) {
+        log::error!("{err}");
+    }
+
+    std::process::exit(1);
 }

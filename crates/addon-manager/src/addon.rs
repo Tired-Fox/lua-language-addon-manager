@@ -51,7 +51,7 @@ impl Addon {
     /// Check if the addon exists in the base bath
     ///
     /// The base path is where a collection of addons lives, not a single addon
-    pub fn exists(&mut self, path: impl AsRef<Path>) -> bool {
+    pub fn exists(&self, path: impl AsRef<Path>) -> bool {
         path.as_ref().to_path_buf().join(&self.repo).exists()
     }
 
@@ -120,15 +120,15 @@ impl FromStr for Addon {
             };
             let host = url
                 .host_str()
-                .ok_or(Error::InvalidSource("missing host to repository".into()))?;
+                .ok_or(Error::InvalidAddon("missing host to repository".into()))?;
 
-            let mut segments = url.path_segments().ok_or(Error::InvalidSource(
+            let mut segments = url.path_segments().ok_or(Error::InvalidAddon(
                 "missing user/org and repostiory path segments".into(),
             ))?;
             let target = segments
                 .next()
-                .ok_or(Error::InvalidSource("missing user/org path segment".into()))?;
-            let repo = segments.next().ok_or(Error::InvalidSource(
+                .ok_or(Error::InvalidAddon("missing user/org path segment".into()))?;
+            let repo = segments.next().ok_or(Error::InvalidAddon(
                 "missing repository path segment".into(),
             ))?;
             Ok(Self::new(
